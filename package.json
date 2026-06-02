@@ -1,0 +1,13 @@
+{
+  "name": "qq-moments",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "QQ空间说说自动化发布工具",
+  "scripts": {
+    "post": "node scripts/qzone.mjs --post --text"
+  },
+  "dependencies": {
+    "playwright-core": "^1.60.0"
+  }
+}
