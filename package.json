@@ -5,7 +5,12 @@
   "type": "module",
   "description": "QQ空间说说自动化发布工具",
   "scripts": {
-    "post": "node scripts/qzone.mjs --post --text"
+    "login": "node scripts/login.mjs --login",
+    "status": "node scripts/login.mjs --status",
+    "logout": "node scripts/login.mjs --logout",
+    "post": "node scripts/publish.mjs",
+    "image": "node scripts/image.mjs",
+    "feed": "node scripts/feed.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.60.0"

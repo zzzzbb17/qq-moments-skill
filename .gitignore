@@ -2,3 +2,6 @@ node_modules/
 tmp/
 *.log
 .DS_Store
+
+# 本地登录数据（cookie/session/二维码）—— 绝不可提交
+.qzone/

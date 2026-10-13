@@ -1,6 +1,6 @@
 ---
 name: qq-moments
-description: "发QQ空间说说，支持文字+图片。自动连接浏览器、检测QQ登录、图文发布。"
+description: "发QQ空间说说，支持文字+图片。扫码登录、自动维持登录态、图文发布。"
 metadata:
   openclaw:
     emoji: "📝"
@@ -55,9 +55,9 @@ metadata:
          │
          ▼
   Step 3 ─ 问权限："这条说说的可见范围是？
-            ① 公开（所有人可见）
-            ② 好友（仅好友可见）
-            ③ 私密（仅自己可见）"
+             ① 公开（所有人可见）
+             ② 好友（仅好友可见）
+             ③ 私密（仅自己可见）"
             → 用户选择
          │
          ▼
@@ -73,74 +73,111 @@ metadata:
 
 ---
 
-## 环境准备（首次使用）
+## 登录
 
-### 检测环境
+**无需电脑 QQ 客户端、无需手动装浏览器** —— 用手机 QQ 扫码即可。
 
-```bash
-cd skills/qq-moments
-node scripts/qzone.mjs --check
-```
-
-输出示例：
-```
-🌐 环境: WSL2
-📎 Edge: /mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe
-✅ 浏览器已启动
-✅ QQ已登录
-```
-
----
-
-## 发布说说
-
-### 纯文字
+登录是**一个原子操作**：自动探状态 → 未登录则取二维码 → 轮询（过期自动换新码）→ 扫上确认后落地收 cookie。
 
 ```bash
-node scripts/qzone.mjs --post --text "今天天气真好☀️"
+node scripts/login.mjs --login      # 登录（若已登录则直接跳过）
+node scripts/login.mjs --status     # 仅检查登录态
+node scripts/login.mjs --logout     # 清除本地登录数据
 ```
 
-### 指定可见权限
-
-```bash
-node scripts/qzone.mjs --post --text "私密说说" --visibility 私密
-node scripts/qzone.mjs --post --text "好友可见" --visibility 好友
-```
+- 二维码约 **2 分钟**有效；`--login` 会自动换新码。
+- `--stop-on-renew`：一换码就退出，便于外层把新码重新发给用户。
+- 登录成功后 cookie 保存在 `.qzone/session.json`（已 gitignore，**绝不上传、绝不提交**）。
 
 ### 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `QZONE_UID` | QQ号 | 3027307483 |
-| `QZONE_CDP` | 指定CDP地址（覆盖自动检测） | 自动 |
-| `QZONE_TIMEOUT` | 超时秒数 | 30 |
+| `QZONE_BROWSER` | 指定 Edge/Chrome 可执行文件 | 自动查找 |
+
+### 原理（简述）
+
+1. 调 `ptqrshow` 取二维码，同时拿到 `qrsig`；`ptqrtoken = hash33(qrsig)`
+2. 轮询 `ptqrlogin`：`66` 等待 / `67` 已扫描待确认 / `65` 失效换新 / `0` 成功
+3. 成功后用无头浏览器访问 `check_sig` 跳转地址，落地收齐 `p_skey` 等 cookie
+4. cookie 持久化，后续无需重新扫码
 
 ---
 
-## QQ登录说明
+## 发布说说
 
-Skill 依赖电脑上 QQ 客户端的登录态：
-1. Edge 打开 Qzone → 自动检测 QQ 客户端
-2. 页面显示"诗柒"快捷登录按钮 → 自动点击
-3. 手机 QQ 弹出授权 → 用户在手机上点"确认"
-4. **首次确认后，后续自动登录**
+### 命令
+
+```bash
+# 预览（不发布，用于让用户确认）
+node scripts/publish.mjs --text "文案" --visibility 公开 --dry-run
+node scripts/publish.mjs --text-file 文案.txt --image a.jpg --image b.png --visibility 公开 --dry-run
+
+# 实际发布
+node scripts/publish.mjs --text "文案" --visibility 公开
+
+# 清理临时图片（一般无需手动，发布成功会自动清）
+node scripts/publish.mjs --cleanup
+```
+
+- `--visibility`：`公开`（所有人可见）/ `好友` / `私密`
+- `--image`：**可重复**，传本地图片路径（png/jpg 均可，自动处理）
+- `--text-file`：多行文案从文件读取（避免命令行换行/转义问题）
+- 登录态自动从 `.qzone/session.json` 读取；发布成功会返回 `tid` + 说说链接
+
+### 三步确认流程（agent 必须逐步走完，缺一不可）
+
+> **铁律 1：文案 / 配图 / 权限，用户没给的项，逐项主动问；绝不省略、绝不替用户默认。**
+> **铁律 2：三步齐了，发布前必须把「最终内容」展示给用户做最后确认；用户说"发"才能发。**
+
+1. **文案** —— 基于用户意图生成，自然口语化、1-3 个 emoji；展示给用户，可修改
+2. **配图** —— **必须问**："有配图吗？（有的话发我 / 或让我生成、找）"
+   - 来源优先级：**① 找现成图 → ② AI 生成 → ③ 本地插画兜底**
+     ```bash
+     node scripts/image.mjs --find "<意境关键词>"     # ① 找图（Wikimedia 免 key；配了 Pexels/Unsplash/Pixabay key 则优先）
+     node scripts/image.mjs --generate "<提示词>"      # ② AI 生图（需先配置，见下）
+     node scripts/image.mjs --svg "<意境关键词>"       # ③ 本地兜底插画（无需 key）
+     ```
+   - 用户**没给图片描述**时，**根据文案意境自己推断关键词**再去找/生成
+   - **首次用到 AI 生成时必须询问用户**是否启用：
+     - 需要 → 让用户给 key → `node scripts/image.mjs --ai-enable --key <K> [--provider openai --base <URL> --model <M>]`
+     - 不需要 → `node scripts/image.mjs --ai-disable`
+   - 图先落成**本地文件**（`.qzone/incoming/`，已 gitignore）再走 `--image`
+   - 用户明确说"没有配图" → 才可无图发布
+   - 发布成功后，`.qzone/incoming/` 内的临时图自动清理（用户原始文件不动）
+3. **权限** —— **必须问**：公开 / 好友 / 私密
+
+→ **最终确认**：把 `文案 + 配图(文件/说明) + 权限` 一起展示给用户 → 用户说"发" → 去掉 `--dry-run` 执行。
+
+### 删除说说
+
+> ⏳ 待补齐：删除接口的确切参数仍在逆向下（`emotion_cgi_delete_v6` 参数未完全对上）。
 
 ---
 
+## 好友动态总结
+
+```bash
+# 空间动态流（好友动态 / 特别关心 / 与我相关 / 那年今日）
+node scripts/feed.mjs [--tab 好友动态] [--count 20]
+
+# 好友列表
+node scripts/feed.mjs --friends
+
+# 看某位好友发了什么（按 uin）
+node scripts/feed.mjs --friend <uin> [--count 20]
+```
+
+- `--tab`：用**登录态打开空间抓取**动态流（作者 / 时间 / 内容），并**写回 cookie**（避免登录态被轮换失效）。
+- `--friends` / `--friend`：走**纯 HTTP 接口**，不启浏览器。
+- agent 据此**总结**给用户（"最近谁发了什么、在聊什么"）；只读、**只给用户本人看**、不落库、不外传。
+
+---
 
 ## 变更日志
 
 | 日期 | 变更 |
 |------|------|
 | 2026-05-24 | 初始创建 |
-| 2026-06-01 | 验证纯文字、图文发布 |
-| 2026-06-01 | 新增 CDP 直连方案 |
-| 2026-06-01 | 跨平台重构（WSL/Windows） |
-| 2026-06-02 | 全面重构：统一为 `qzone.mjs`，三步确认流程 |
-| 2026-06-02 | 修复发表按钮（jQuery事件绑定） |
-| 2026-06-02 | QQ客户端快捷登录支持 |
-| 2026-06-02 | 修复权限设置（直接DOM操作） |
-| 2026-06-02 | 修复防重复（单次触发+编辑器检测） |
-| 2026-06-02 | 修复权限（ugc_right=64 API拦截方式） |
-| 2026-06-02 | 修复登录检测（严格检测#login_div） |
 | 2026-06-02 | 最终稳定版：文字+权限，API发布 |
+| 2026-10-10 | 登录重构：扫码登录（ptlogin2）、无头浏览器落地、cookie 持久化；废弃 WSL/CDP 方案 |
